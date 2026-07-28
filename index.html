@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Depot — Warehouse Inventory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#14171c; --panel:#1b1f26; --panel-2:#20252d; --border:#2a2f38;
+    --text:#e8e6e1; --muted:#8b92a0; --faint:#5b6270;
+    --amber:#f5a623; --amber-dim:#8a6420;
+    --green:#3dd68c; --green-dim:#1f6b48;
+    --red:#e5484d; --red-dim:#7a2528;
+    --radius:6px;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'Inter',sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);}
+  ::selection{background:var(--amber);color:#14171c;}
+  a{color:inherit;}
+  button{font-family:var(--font-body);cursor:pointer;}
+  input,select,textarea{font-family:var(--font-body);}
+
+  /* ---------- layout shell ---------- */
+  #app{display:none;grid-template-columns:220px 1fr;min-height:100vh;}
+  #app.ready{display:grid;}
+
+  .sidebar{
+    background:var(--panel);border-right:1px solid var(--border);
+    padding:22px 14px;display:flex;flex-direction:column;gap:4px;
+  }
+  .brand{
+    font-family:var(--font-display);font-weight:700;font-size:19px;
+    display:flex;align-items:center;gap:9px;padding:0 8px 22px 8px;letter-spacing:.2px;
+  }
+  .brand .lights{display:flex;flex-direction:column;gap:3px;padding:4px;background:#0e1116;border-radius:4px;border:1px solid var(--border);}
+  .brand .lights i{width:6px;height:6px;border-radius:50%;display:block;}
+  .brand .lights i:nth-child(1){background:var(--red);}
+  .brand .lights i:nth-child(2){background:var(--amber);}
+  .brand .lights i:nth-child(3){background:var(--green);}
+
+  .nav-item{
+    display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);
+    color:var(--muted);font-size:13.5px;font-weight:500;border:none;background:transparent;
+    text-align:left;width:100%;transition:background .12s,color .12s;
+  }
+  .nav-item:hover{background:var(--panel-2);color:var(--text);}
+  .nav-item.active{background:var(--panel-2);color:var(--amber);}
+  .nav-item svg{width:16px;height:16px;flex:none;opacity:.9;}
+
+  .nav-section-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);padding:16px 12px 6px;}
+
+  .sidebar-foot{margin-top:auto;padding:10px 8px 0;border-top:1px solid var(--border);}
+  .who{font-size:12px;color:var(--faint);padding:10px 4px 6px;word-break:break-all;}
+  .signout{width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:transparent;color:var(--muted);font-size:12.5px;}
+  .signout:hover{border-color:var(--red);color:var(--red);}
+
+  .main{padding:28px 34px 60px;max-width:1180px;}
+  .page{display:none;}
+  .page.active{display:block;animation:fade .15s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(3px);}to{opacity:1;transform:none;}}
+
+  h1.page-title{font-family:var(--font-display);font-size:24px;font-weight:600;margin:0 0 4px;}
+  .page-sub{color:var(--muted);font-size:13.5px;margin:0 0 26px;}
+
+  /* ---------- cards / grid ---------- */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px 18px;}
+  .card .num{font-family:var(--font-mono);font-size:26px;font-weight:600;}
+  .card .lbl{color:var(--muted);font-size:12px;margin-top:4px;}
+  .card.warn .num{color:var(--amber);}
+  .card.bad .num{color:var(--red);}
+  .card.good .num{color:var(--green);}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:22px;overflow:hidden;}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);}
+  .panel-head h2{font-family:var(--font-display);font-size:15px;margin:0;font-weight:600;}
+  .panel-body{padding:6px 0;}
+  .panel-body.pad{padding:16px 18px;}
+
+  /* ---------- signal light (signature element) ---------- */
+  .signal{display:inline-flex;gap:3px;padding:3px;background:#0e1116;border-radius:4px;border:1px solid var(--border);vertical-align:middle;}
+  .signal i{width:7px;height:7px;border-radius:50%;background:#2a2f38;}
+  .signal.out i:nth-child(1){background:var(--red);box-shadow:0 0 6px var(--red);}
+  .signal.low i:nth-child(2){background:var(--amber);box-shadow:0 0 6px var(--amber);}
+  .signal.ok i:nth-child(3){background:var(--green);box-shadow:0 0 6px var(--green);}
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{text-align:left;color:var(--muted);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;padding:10px 18px;border-bottom:1px solid var(--border);}
+  td{padding:11px 18px;border-bottom:1px solid var(--border);}
+  tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:var(--panel-2);}
+  td.mono,th.num-col{font-family:var(--font-mono);}
+  td.mono{font-size:12.5px;color:var(--muted);}
+  .empty-row td{color:var(--faint);text-align:center;padding:34px 18px;font-size:13px;}
+
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:.02em;}
+  .pill.in{background:rgba(61,214,140,.12);color:var(--green);}
+  .pill.out{background:rgba(229,72,77,.12);color:var(--red);}
+  .pill.adj{background:rgba(245,166,35,.12);color:var(--amber);}
+
+  /* ---------- buttons / forms ---------- */
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-size:13px;font-weight:500;}
+  .btn:hover{border-color:var(--faint);}
+  .btn.primary{background:var(--amber);border-color:var(--amber);color:#14171c;font-weight:600;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn.danger{color:var(--red);}
+  .btn.danger:hover{border-color:var(--red);}
+  .btn.sm{padding:5px 10px;font-size:12px;}
+  .btn.ghost{background:transparent;}
+
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;}
+  .search{flex:1;min-width:180px;position:relative;}
+  .search input{width:100%;padding:9px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-size:13px;}
+  select.filter{padding:9px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-size:13px;}
+
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500;}
+  .field input,.field select,.field textarea{
+    width:100%;padding:10px 12px;border-radius:var(--radius);border:1px solid var(--border);
+    background:var(--panel-2);color:var(--text);font-size:13.5px;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--amber);}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .hint{font-size:11.5px;color:var(--faint);margin-top:5px;}
+
+  /* ---------- modal ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(10,12,15,.6);display:none;align-items:flex-start;justify-content:center;padding:40px 20px;z-index:50;overflow:auto;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:10px;width:100%;max-width:460px;padding:22px 22px 20px;}
+  .modal h3{font-family:var(--font-display);margin:0 0 18px;font-size:16px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+
+  /* ---------- auth screen ---------- */
+  #auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .auth-box{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:30px 28px;}
+  .auth-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;font-family:var(--font-display);font-weight:700;font-size:20px;}
+  .auth-msg{font-size:12.5px;margin-top:12px;min-height:16px;}
+  .auth-msg.error{color:var(--red);}
+  .auth-msg.ok{color:var(--green);}
+  .auth-toggle{text-align:center;margin-top:16px;font-size:12.5px;color:var(--muted);}
+  .auth-toggle button{background:none;border:none;color:var(--amber);font-size:12.5px;padding:0;}
+
+  #config-banner{
+    display:none;background:var(--red-dim);color:#ffe3e3;font-size:13px;padding:10px 20px;
+    text-align:center;border-bottom:1px solid var(--red);
+  }
+  #config-banner code{background:rgba(0,0,0,.25);padding:1px 6px;border-radius:4px;font-family:var(--font-mono);}
+
+  .toast{position:fixed;bottom:22px;right:22px;background:var(--panel);border:1px solid var(--border);
+    border-left:3px solid var(--green);padding:12px 16px;border-radius:6px;font-size:13px;z-index:99;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);display:none;}
+  .toast.error{border-left-color:var(--red);}
+  .toast.show{display:block;animation:fade .15s ease;}
+
+  @media(max-width:880px){
+    #app.ready{grid-template-columns:1fr;}
+    .sidebar{position:sticky;top:0;z-index:10;flex-direction:row;flex-wrap:wrap;padding:12px;}
+    .brand{padding:6px 8px;}
+    .nav-section-label{display:none;}
+    .sidebar-foot{margin-top:0;border-top:none;}
+    .cards{grid-template-columns:1fr 1fr;}
+    .field-row{grid-template-columns:1fr;}
+    .main{padding:20px;}
+  }
+</style>
+</head>
+<body>
+
+<div id="config-banner">
+  Supabase isn't configured yet — open <code>index.html</code> and set <code>SUPABASE_URL</code> / <code>SUPABASE_ANON_KEY</code> near the top of the script, then run <code>schema.sql</code> in your Supabase project's SQL editor.
+</div>
+
+<!-- ============================= AUTH SCREEN ============================= -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-brand">
+      <span class="lights" style="display:flex;flex-direction:column;gap:3px;padding:4px;background:#0e1116;border-radius:4px;border:1px solid var(--border);">
+        <i style="width:6px;height:6px;border-radius:50%;display:block;background:var(--red)"></i>
+        <i style="width:6px;height:6px;border-radius:50%;display:block;background:var(--amber)"></i>
+        <i style="width:6px;height:6px;border-radius:50%;display:block;background:var(--green)"></i>
+      </span>
+      Depot
+    </div>
+    <form id="auth-form">
+      <div class="field"><label>Email</label><input type="email" id="auth-email" required autocomplete="username"></div>
+      <div class="field"><label>Password</label><input type="password" id="auth-password" required autocomplete="current-password" minlength="6"></div>
+      <button type="submit" class="btn primary" style="width:100%;justify-content:center;" id="auth-submit">Sign in</button>
+      <div class="auth-msg" id="auth-msg"></div>
+    </form>
+    <div class="auth-toggle">
+      <span id="auth-toggle-text">New here?</span>
+      <button id="auth-toggle-btn" type="button">Create an account</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================ APP =================================== -->
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="lights"><i></i><i></i><i></i></span>
+      Depot
+    </div>
+
+    <div class="nav-section-label">Overview</div>
+    <button class="nav-item active" data-page="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      Dashboard
+    </button>
+
+    <div class="nav-section-label">Inventory</div>
+    <button class="nav-item" data-page="items">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+      Items
+    </button>
+    <button class="nav-item" data-page="stock-in">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+      Stock In
+    </button>
+    <button class="nav-item" data-page="stock-out">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7 7 7-7"/></svg>
+      Stock Out
+    </button>
+    <button class="nav-item" data-page="ledger">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h4"/></svg>
+      Ledger
+    </button>
+
+    <div class="nav-section-label">Setup</div>
+    <button class="nav-item" data-page="vendors">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="1"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+      Vendors
+    </button>
+    <button class="nav-item" data-page="warehouses">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-8h6v8"/></svg>
+      Warehouses
+    </button>
+
+    <div class="sidebar-foot">
+      <div class="who" id="who-email">—</div>
+      <button class="signout" id="signout-btn">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- DASHBOARD -->
+    <section class="page active" id="page-dashboard">
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-sub">Live stock position across all warehouses.</p>
+      <div class="cards">
+        <div class="card"><div class="num" id="stat-items">—</div><div class="lbl">Active items</div></div>
+        <div class="card good"><div class="num" id="stat-stock-value">—</div><div class="lbl">Stock value (₹)</div></div>
+        <div class="card warn"><div class="num" id="stat-low">—</div><div class="lbl">Below reorder level</div></div>
+        <div class="card bad"><div class="num" id="stat-out">—</div><div class="lbl">Out of stock</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Low stock &amp; out-of-stock alerts</h2></div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Signal</th><th>Item</th><th>Warehouse</th><th class="num-col">On hand</th><th class="num-col">Reorder level</th></tr></thead>
+            <tbody id="alerts-body"><tr class="empty-row"><td colspan="5">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Recent activity</h2></div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Date</th><th>Type</th><th>Item</th><th class="num-col">Qty</th><th>Warehouse</th><th>Reference</th></tr></thead>
+            <tbody id="recent-body"><tr class="empty-row"><td colspan="6">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ITEMS -->
+    <section class="page" id="page-items">
+      <h1 class="page-title">Items</h1>
+      <p class="page-sub">Item master — descriptions, unit of measure, category, default vendor.</p>
+      <div class="toolbar">
+        <div class="search"><input type="text" id="items-search" placeholder="Search by code, description, make…"></div>
+        <select class="filter" id="items-category-filter"><option value="">All categories</option></select>
+        <button class="btn primary" id="btn-new-item">+ New item</button>
+      </div>
+      <div class="panel">
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Stock</th><th>Code</th><th>Description</th><th>UOM</th><th>Category</th><th>Make</th><th class="num-col">Rate</th><th></th></tr></thead>
+            <tbody id="items-body"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- STOCK IN -->
+    <section class="page" id="page-stock-in">
+      <h1 class="page-title">Stock In</h1>
+      <p class="page-sub">Record material received against a purchase / delivery.</p>
+      <div class="panel">
+        <div class="panel-body pad">
+          <form id="form-stock-in">
+            <div class="field-row">
+              <div class="field"><label>Item</label><select id="in-item" required></select></div>
+              <div class="field"><label>Warehouse</label><select id="in-warehouse" required></select></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Quantity</label><input type="number" id="in-qty" step="0.001" min="0.001" required></div>
+              <div class="field"><label>Unit rate (₹, without tax)</label><input type="number" id="in-rate" step="0.01" min="0"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Vendor</label><select id="in-vendor"><option value="">—</option></select></div>
+              <div class="field"><label>Reference / invoice no.</label><input type="text" id="in-ref" placeholder="e.g. AIPL2324/DS/0291"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Date</label><input type="date" id="in-date" required></div>
+              <div class="field"><label>Remarks</label><input type="text" id="in-remarks"></div>
+            </div>
+            <button type="submit" class="btn primary">Record stock in</button>
+          </form>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Recent stock-in entries</h2></div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Date</th><th>Item</th><th class="num-col">Qty</th><th>Warehouse</th><th>Vendor</th><th>Reference</th></tr></thead>
+            <tbody id="in-recent-body"><tr class="empty-row"><td colspan="6">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- STOCK OUT -->
+    <section class="page" id="page-stock-out">
+      <h1 class="page-title">Stock Out</h1>
+      <p class="page-sub">Issue material to a site, project, or department.</p>
+      <div class="panel">
+        <div class="panel-body pad">
+          <form id="form-stock-out">
+            <div class="field-row">
+              <div class="field"><label>Item</label><select id="out-item" required></select></div>
+              <div class="field"><label>Warehouse</label><select id="out-warehouse" required></select></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Quantity</label><input type="number" id="out-qty" step="0.001" min="0.001" required><div class="hint" id="out-avail-hint"></div></div>
+              <div class="field"><label>Issued to</label><input type="text" id="out-issued-to" placeholder="Site / project / person"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Reference no.</label><input type="text" id="out-ref" placeholder="Requisition / gate-pass no."></div>
+              <div class="field"><label>Date</label><input type="date" id="out-date" required></div>
+            </div>
+            <div class="field"><label>Remarks</label><input type="text" id="out-remarks"></div>
+            <button type="submit" class="btn primary">Record stock out</button>
+          </form>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Recent stock-out entries</h2></div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Date</th><th>Item</th><th class="num-col">Qty</th><th>Warehouse</th><th>Issued to</th><th>Reference</th></tr></thead>
+            <tbody id="out-recent-body"><tr class="empty-row"><td colspan="6">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- LEDGER -->
+    <section class="page" id="page-ledger">
+      <h1 class="page-title">Stock Ledger</h1>
+      <p class="page-sub">Every movement, filterable by item and warehouse.</p>
+      <div class="toolbar">
+        <select class="filter" id="ledger-item-filter"><option value="">All items</option></select>
+        <select class="filter" id="ledger-warehouse-filter"><option value="">All warehouses</option></select>
+        <select class="filter" id="ledger-type-filter">
+          <option value="">All types</option>
+          <option value="IN">Stock In</option>
+          <option value="OUT">Stock Out</option>
+        </select>
+      </div>
+      <div class="panel">
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Date</th><th>Type</th><th>Item</th><th class="num-col">Qty</th><th>Warehouse</th><th>Counterparty</th><th>Reference</th><th>Remarks</th></tr></thead>
+            <tbody id="ledger-body"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VENDORS -->
+    <section class="page" id="page-vendors">
+      <h1 class="page-title">Vendors</h1>
+      <p class="page-sub">Suppliers you receive material from.</p>
+      <div class="toolbar"><div style="flex:1"></div><button class="btn primary" id="btn-new-vendor">+ New vendor</button></div>
+      <div class="panel">
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th></th></tr></thead>
+            <tbody id="vendors-body"><tr class="empty-row"><td colspan="5">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- WAREHOUSES -->
+    <section class="page" id="page-warehouses">
+      <h1 class="page-title">Warehouses</h1>
+      <p class="page-sub">Physical stores, site stores, or yards holding stock.</p>
+      <div class="toolbar"><div style="flex:1"></div><button class="btn primary" id="btn-new-warehouse">+ New warehouse</button></div>
+      <div class="panel">
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>Code</th><th>Name</th><th>Location</th><th></th></tr></thead>
+            <tbody id="warehouses-body"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============================= MODALS ============================= -->
+<div class="overlay" id="modal-item">
+  <div class="modal">
+    <h3 id="item-modal-title">New item</h3>
+    <form id="form-item">
+      <input type="hidden" id="item-id">
+      <div class="field-row">
+        <div class="field"><label>Item code</label><input type="text" id="item-code" required></div>
+        <div class="field"><label>UOM</label><input type="text" id="item-uom" value="Nos" required></div>
+      </div>
+      <div class="field"><label>Description</label><input type="text" id="item-description" required></div>
+      <div class="field"><label>Short name</label><input type="text" id="item-short-name"></div>
+      <div class="field-row">
+        <div class="field"><label>Category</label><select id="item-category"><option value="">—</option></select></div>
+        <div class="field"><label>Type</label>
+          <select id="item-type">
+            <option>Hardware</option><option>Software</option><option>Service</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Make / brand</label><input type="text" id="item-make"></div>
+        <div class="field"><label>Default vendor</label><select id="item-vendor"><option value="">—</option></select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Unit rate (₹)</label><input type="number" id="item-rate" step="0.01" min="0" value="0"></div>
+        <div class="field"><label>Reorder level</label><input type="number" id="item-reorder" step="0.001" min="0" value="0"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save item</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="modal-vendor">
+  <div class="modal">
+    <h3>New vendor</h3>
+    <form id="form-vendor">
+      <div class="field"><label>Name</label><input type="text" id="vendor-name" required></div>
+      <div class="field-row">
+        <div class="field"><label>Contact person</label><input type="text" id="vendor-contact"></div>
+        <div class="field"><label>Phone</label><input type="text" id="vendor-phone"></div>
+      </div>
+      <div class="field"><label>Email</label><input type="email" id="vendor-email"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save vendor</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="modal-warehouse">
+  <div class="modal">
+    <h3>New warehouse</h3>
+    <form id="form-warehouse">
+      <div class="field"><label>Code</label><input type="text" id="warehouse-code" required placeholder="e.g. SURAT-MAIN"></div>
+      <div class="field"><label>Name</label><input type="text" id="warehouse-name" required></div>
+      <div class="field"><label>Location</label><input type="text" id="warehouse-location"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save warehouse</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ==========================================================================
+   CONFIGURE ME — paste your Supabase project's Project URL and anon/public
+   key below (Supabase Dashboard → Project Settings → API). Then run
+   schema.sql in the SQL editor before using this app.
+   ========================================================================== */
+const SUPABASE_URL = 'https://doxweudqhbabutwylarj.supabase.co';       // e.g. https://xxxx.supabase.co
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRveHdldWRxaGJhYnV0d3lsYXJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNDI0NTMsImV4cCI6MjEwMDgxODQ1M30.NrCfL8tvAOlIuDyjJsOVdGCe81xnzgUyWDxE9nvAvI0';
+
+const isConfigured = !SUPABASE_URL.includes('YOUR_') && !SUPABASE_ANON_KEY.includes('YOUR_');
+if (!isConfigured) document.getElementById('config-banner').style.display = 'block';
+
+const sb = isConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+/* ---------------------------- small utilities ---------------------------- */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const fmtMoney = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', {maximumFractionDigits: 2});
+const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', {maximumFractionDigits: 3});
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '—';
+const todayStr = () => new Date().toISOString().slice(0,10);
+
+function toast(msg, isError=false){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => t.className = 'toast', 2600);
+}
+
+function signalClass(onHand, reorder){
+  if (onHand <= 0) return 'out';
+  if (reorder > 0 && onHand < reorder) return 'low';
+  return 'ok';
+}
+function signalHtml(onHand, reorder){
+  return `<span class="signal ${signalClass(onHand, reorder)}"><i></i><i></i><i></i></span>`;
+}
+
+/* ------------------------------- app cache ------------------------------- */
+let CACHE = { items: [], vendors: [], warehouses: [], categories: [], stock: [] };
+
+/* =============================== AUTH FLOW =============================== */
+let authMode = 'signin'; // or 'signup'
+
+$('#auth-toggle-btn').addEventListener('click', () => {
+  authMode = authMode === 'signin' ? 'signup' : 'signin';
+  $('#auth-submit').textContent = authMode === 'signin' ? 'Sign in' : 'Create account';
+  $('#auth-toggle-text').textContent = authMode === 'signin' ? 'New here?' : 'Already have an account?';
+  $('#auth-toggle-btn').textContent = authMode === 'signin' ? 'Create an account' : 'Sign in instead';
+  $('#auth-msg').textContent = '';
+});
+
+$('#auth-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!isConfigured) { toast('Configure Supabase first — see banner above.', true); return; }
+  const email = $('#auth-email').value.trim();
+  const password = $('#auth-password').value;
+  const msg = $('#auth-msg');
+  msg.className = 'auth-msg'; msg.textContent = 'Working…';
+  const fn = authMode === 'signin' ? sb.auth.signInWithPassword({email, password}) : sb.auth.signUp({email, password});
+  const { data, error } = await fn;
+  if (error) { msg.className = 'auth-msg error'; msg.textContent = error.message; return; }
+  if (authMode === 'signup' && !data.session) {
+    msg.className = 'auth-msg ok';
+    msg.textContent = 'Account created — check your email to confirm, then sign in.';
+    return;
+  }
+  msg.textContent = '';
+  await boot();
+});
+
+$('#signout-btn').addEventListener('click', async () => {
+  await sb.auth.signOut();
+  document.getElementById('app').classList.remove('ready');
+  document.getElementById('auth-screen').style.display = 'flex';
+});
+
+async function checkSession(){
+  if (!isConfigured) return;
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await boot();
+}
+
+/* ================================ NAVIGATION ============================== */
+$$('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('.nav-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const page = btn.dataset.page;
+    $$('.page').forEach(p => p.classList.remove('active'));
+    $('#page-' + page).classList.add('active');
+    // lazy refresh per page
+    if (page === 'dashboard') renderDashboard();
+    if (page === 'items') renderItems();
+    if (page === 'stock-in') renderStockInPage();
+    if (page === 'stock-out') renderStockOutPage();
+    if (page === 'ledger') renderLedger();
+    if (page === 'vendors') renderVendors();
+    if (page === 'warehouses') renderWarehouses();
+  });
+});
+
+/* modal open/close helpers */
+function openModal(id){ $(id).classList.add('show'); }
+function closeModal(id){ $(id).classList.remove('show'); }
+$$('.overlay').forEach(ov => {
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('show'); });
+  ov.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => ov.classList.remove('show')));
+});
+
+/* ================================ BOOTSTRAP ================================ */
+async function boot(){
+  const { data: { user } } = await sb.auth.getUser();
+  $('#who-email').textContent = user ? user.email : '';
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').classList.add('ready');
+  $('#in-date').value = todayStr();
+  $('#out-date').value = todayStr();
+  await loadAllData();
+  renderDashboard();
+}
+
+async function loadAllData(){
+  const [items, vendors, warehouses, categories, stock] = await Promise.all([
+    sb.from('items').select('*').eq('is_active', true).order('item_code'),
+    sb.from('vendors').select('*').eq('is_active', true).order('name'),
+    sb.from('warehouses').select('*').eq('is_active', true).order('name'),
+    sb.from('categories').select('*').order('name'),
+    sb.from('current_stock').select('*'),
+  ]);
+  CACHE.items = items.data || [];
+  CACHE.vendors = vendors.data || [];
+  CACHE.warehouses = warehouses.data || [];
+  CACHE.categories = categories.data || [];
+  CACHE.stock = stock.data || [];
+  if (items.error) toast('Could not load items: ' + items.error.message, true);
+
+  populateSelects();
+}
+
+function populateSelects(){
+  const catOpts = CACHE.categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  $('#item-category').innerHTML = '<option value="">—</option>' + catOpts;
+  $('#items-category-filter').innerHTML = '<option value="">All categories</option>' + catOpts;
+
+  const vendorOpts = CACHE.vendors.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
+  $('#item-vendor').innerHTML = '<option value="">—</option>' + vendorOpts;
+  $('#in-vendor').innerHTML = '<option value="">—</option>' + vendorOpts;
+
+  const itemOpts = CACHE.items.map(i => `<option value="${i.id}">${escapeHtml(i.item_code)} — ${escapeHtml(i.description)}</option>`).join('');
+  $('#in-item').innerHTML = itemOpts || '<option value="">No items yet</option>';
+  $('#out-item').innerHTML = itemOpts || '<option value="">No items yet</option>';
+  $('#ledger-item-filter').innerHTML = '<option value="">All items</option>' + itemOpts;
+
+  const whOpts = CACHE.warehouses.map(w => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
+  $('#in-warehouse').innerHTML = whOpts || '<option value="">No warehouses yet</option>';
+  $('#out-warehouse').innerHTML = whOpts || '<option value="">No warehouses yet</option>';
+  $('#ledger-warehouse-filter').innerHTML = '<option value="">All warehouses</option>' + whOpts;
+}
+
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function stockFor(itemId, warehouseId){
+  return CACHE.stock.filter(s => s.item_id === itemId && (!warehouseId || s.warehouse_id === warehouseId))
+    .reduce((sum, s) => sum + Number(s.quantity_on_hand), 0);
+}
+function totalStockFor(itemId){
+  return CACHE.stock.filter(s => s.item_id === itemId).reduce((sum, s) => sum + Number(s.quantity_on_hand), 0);
+}
+
+/* ================================ DASHBOARD ================================ */
+async function renderDashboard(){
+  const totalsByItem = {};
+  CACHE.stock.forEach(s => { totalsByItem[s.item_id] = (totalsByItem[s.item_id] || 0) + Number(s.quantity_on_hand); });
+
+  $('#stat-items').textContent = CACHE.items.length;
+
+  let stockValue = 0, lowCount = 0, outCount = 0;
+  const alerts = [];
+  CACHE.stock.forEach(row => {
+    const item = CACHE.items.find(i => i.id === row.item_id);
+    if (!item) return;
+    stockValue += Number(row.quantity_on_hand) * Number(item.unit_rate || 0);
+    if (row.quantity_on_hand <= 0 && item.reorder_level > 0) { outCount++; alerts.push(row); }
+    else if (row.reorder_level > 0 && row.quantity_on_hand < row.reorder_level) { lowCount++; alerts.push(row); }
+  });
+  $('#stat-stock-value').textContent = fmtMoney(stockValue);
+  $('#stat-low').textContent = lowCount;
+  $('#stat-out').textContent = outCount;
+
+  $('#alerts-body').innerHTML = alerts.length ? alerts.map(a => `
+    <tr>
+      <td>${signalHtml(a.quantity_on_hand, a.reorder_level)}</td>
+      <td>${escapeHtml(a.item_code)} — ${escapeHtml(a.description)}</td>
+      <td>${escapeHtml(a.warehouse_name)}</td>
+      <td class="mono">${fmtNum(a.quantity_on_hand)} ${escapeHtml(a.uom)}</td>
+      <td class="mono">${fmtNum(a.reorder_level)}</td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Nothing needs attention — all items are above reorder level.</td></tr>';
+
+  const { data: recent } = await sb.from('stock_transactions')
+    .select('*, items(item_code, description, uom), warehouses(name)')
+    .order('created_at', { ascending: false }).limit(8);
+  $('#recent-body').innerHTML = (recent && recent.length) ? recent.map(rowHtmlRecent).join('')
+    : '<tr class="empty-row"><td colspan="6">No activity yet — record a stock-in to get started.</td></tr>';
+}
+
+function rowHtmlRecent(t){
+  const pillClass = t.txn_type === 'IN' || t.txn_type === 'TRANSFER_IN' ? 'in' : (t.txn_type === 'OUT' || t.txn_type === 'TRANSFER_OUT' ? 'out' : 'adj');
+  return `<tr>
+    <td>${fmtDate(t.txn_date)}</td>
+    <td><span class="pill ${pillClass}">${t.txn_type}</span></td>
+    <td>${escapeHtml(t.items?.item_code || '')} — ${escapeHtml(t.items?.description || '')}</td>
+    <td class="mono">${fmtNum(t.quantity)} ${escapeHtml(t.items?.uom || '')}</td>
+    <td>${escapeHtml(t.warehouses?.name || '')}</td>
+    <td class="mono">${escapeHtml(t.reference_no || '—')}</td>
+  </tr>`;
+}
+
+/* ================================== ITEMS ================================== */
+function renderItems(){
+  const q = $('#items-search').value.trim().toLowerCase();
+  const catFilter = $('#items-category-filter').value;
+  const rows = CACHE.items.filter(i => {
+    const matchesQ = !q || [i.item_code, i.description, i.make, i.short_name].some(v => (v||'').toLowerCase().includes(q));
+    const matchesCat = !catFilter || i.category_id === catFilter;
+    return matchesQ && matchesCat;
+  });
+  $('#items-body').innerHTML = rows.length ? rows.map(i => {
+    const onHand = totalStockFor(i.id);
+    const cat = CACHE.categories.find(c => c.id === i.category_id);
+    return `<tr>
+      <td>${signalHtml(onHand, i.reorder_level)}</td>
+      <td class="mono">${escapeHtml(i.item_code)}</td>
+      <td>${escapeHtml(i.description)}</td>
+      <td>${escapeHtml(i.uom)}</td>
+      <td>${escapeHtml(cat ? cat.name : '—')}</td>
+      <td>${escapeHtml(i.make || '—')}</td>
+      <td class="mono">${fmtMoney(i.unit_rate)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn sm ghost" data-edit-item="${i.id}">Edit</button>
+        <button class="btn sm ghost danger" data-del-item="${i.id}">Delete</button>
+      </td>
+    </tr>`;
+  }).join('') : '<tr class="empty-row"><td colspan="8">No items match. Try clearing filters, or add a new item.</td></tr>';
+
+  $$('[data-edit-item]').forEach(b => b.addEventListener('click', () => openItemModal(b.dataset.editItem)));
+  $$('[data-del-item]').forEach(b => b.addEventListener('click', () => deleteItem(b.dataset.delItem)));
+}
+$('#items-search').addEventListener('input', renderItems);
+$('#items-category-filter').addEventListener('change', renderItems);
+
+$('#btn-new-item').addEventListener('click', () => openItemModal(null));
+
+function openItemModal(id){
+  const item = id ? CACHE.items.find(i => i.id === id) : null;
+  $('#item-modal-title').textContent = item ? 'Edit item' : 'New item';
+  $('#item-id').value = item?.id || '';
+  $('#item-code').value = item?.item_code || '';
+  $('#item-uom').value = item?.uom || 'Nos';
+  $('#item-description').value = item?.description || '';
+  $('#item-short-name').value = item?.short_name || '';
+  $('#item-category').value = item?.category_id || '';
+  $('#item-type').value = item?.item_type || 'Hardware';
+  $('#item-make').value = item?.make || '';
+  $('#item-vendor').value = item?.default_vendor_id || '';
+  $('#item-rate').value = item?.unit_rate ?? 0;
+  $('#item-reorder').value = item?.reorder_level ?? 0;
+  openModal('#modal-item');
+}
+
+$('#form-item').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = $('#item-id').value;
+  const payload = {
+    item_code: $('#item-code').value.trim(),
+    uom: $('#item-uom').value.trim(),
+    description: $('#item-description').value.trim(),
+    short_name: $('#item-short-name').value.trim() || null,
+    category_id: $('#item-category').value || null,
+    item_type: $('#item-type').value,
+    make: $('#item-make').value.trim() || null,
+    default_vendor_id: $('#item-vendor').value || null,
+    unit_rate: Number($('#item-rate').value) || 0,
+    reorder_level: Number($('#item-reorder').value) || 0,
+  };
+  const { error } = id ? await sb.from('items').update(payload).eq('id', id) : await sb.from('items').insert(payload);
+  if (error) { toast('Save failed: ' + error.message, true); return; }
+  closeModal('#modal-item');
+  toast(id ? 'Item updated.' : 'Item created.');
+  await loadAllData(); renderItems();
+});
+
+async function deleteItem(id){
+  if (!confirm('Delete this item? Its transaction history will remain, but it will no longer appear in lists.')) return;
+  const { error } = await sb.from('items').update({ is_active: false }).eq('id', id);
+  if (error) { toast('Delete failed: ' + error.message, true); return; }
+  toast('Item removed.');
+  await loadAllData(); renderItems();
+}
+
+/* ================================ STOCK IN ================================ */
+function renderStockInPage(){
+  refreshStockInList();
+}
+async function refreshStockInList(){
+  const { data } = await sb.from('stock_transactions')
+    .select('*, items(item_code, description, uom), warehouses(name), vendors(name)')
+    .eq('txn_type', 'IN').order('created_at', { ascending: false }).limit(15);
+  $('#in-recent-body').innerHTML = (data && data.length) ? data.map(t => `
+    <tr>
+      <td>${fmtDate(t.txn_date)}</td>
+      <td>${escapeHtml(t.items?.item_code || '')} — ${escapeHtml(t.items?.description || '')}</td>
+      <td class="mono">${fmtNum(t.quantity)} ${escapeHtml(t.items?.uom || '')}</td>
+      <td>${escapeHtml(t.warehouses?.name || '')}</td>
+      <td>${escapeHtml(t.vendors?.name || '—')}</td>
+      <td class="mono">${escapeHtml(t.reference_no || '—')}</td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">No stock-in entries yet.</td></tr>';
+}
+
+$('#form-stock-in').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { data: { user } } = await sb.auth.getUser();
+  const payload = {
+    item_id: $('#in-item').value,
+    warehouse_id: $('#in-warehouse').value,
+    txn_type: 'IN',
+    quantity: Number($('#in-qty').value),
+    unit_rate: Number($('#in-rate').value) || 0,
+    vendor_id: $('#in-vendor').value || null,
+    reference_no: $('#in-ref').value.trim() || null,
+    txn_date: $('#in-date').value,
+    remarks: $('#in-remarks').value.trim() || null,
+    created_by: user?.id || null,
+  };
+  if (!payload.item_id || !payload.warehouse_id) { toast('Add at least one item and warehouse first.', true); return; }
+  const { error } = await sb.from('stock_transactions').insert(payload);
+  if (error) { toast('Could not record stock in: ' + error.message, true); return; }
+  toast('Stock in recorded.');
+  e.target.reset();
+  $('#in-date').value = todayStr();
+  await loadAllData();
+  refreshStockInList();
+});
+
+/* =============================== STOCK OUT ================================ */
+function renderStockOutPage(){
+  refreshStockOutList();
+  updateOutAvailHint();
+}
+async function refreshStockOutList(){
+  const { data } = await sb.from('stock_transactions')
+    .select('*, items(item_code, description, uom), warehouses(name)')
+    .eq('txn_type', 'OUT').order('created_at', { ascending: false }).limit(15);
+  $('#out-recent-body').innerHTML = (data && data.length) ? data.map(t => `
+    <tr>
+      <td>${fmtDate(t.txn_date)}</td>
+      <td>${escapeHtml(t.items?.item_code || '')} — ${escapeHtml(t.items?.description || '')}</td>
+      <td class="mono">${fmtNum(t.quantity)} ${escapeHtml(t.items?.uom || '')}</td>
+      <td>${escapeHtml(t.warehouses?.name || '')}</td>
+      <td>${escapeHtml(t.issued_to || '—')}</td>
+      <td class="mono">${escapeHtml(t.reference_no || '—')}</td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">No stock-out entries yet.</td></tr>';
+}
+function updateOutAvailHint(){
+  const itemId = $('#out-item').value, whId = $('#out-warehouse').value;
+  if (!itemId || !whId) { $('#out-avail-hint').textContent = ''; return; }
+  const onHand = stockFor(itemId, whId);
+  $('#out-avail-hint').textContent = `${fmtNum(onHand)} currently on hand at this warehouse`;
+}
+$('#out-item').addEventListener('change', updateOutAvailHint);
+$('#out-warehouse').addEventListener('change', updateOutAvailHint);
+
+$('#form-stock-out').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const itemId = $('#out-item').value, whId = $('#out-warehouse').value;
+  const qty = Number($('#out-qty').value);
+  const onHand = stockFor(itemId, whId);
+  if (qty > onHand) {
+    if (!confirm(`Only ${fmtNum(onHand)} on hand at this warehouse. Record this stock-out anyway (stock will go negative)?`)) return;
+  }
+  const { data: { user } } = await sb.auth.getUser();
+  const payload = {
+    item_id: itemId,
+    warehouse_id: whId,
+    txn_type: 'OUT',
+    quantity: qty,
+    issued_to: $('#out-issued-to').value.trim() || null,
+    reference_no: $('#out-ref').value.trim() || null,
+    txn_date: $('#out-date').value,
+    remarks: $('#out-remarks').value.trim() || null,
+    created_by: user?.id || null,
+  };
+  if (!payload.item_id || !payload.warehouse_id) { toast('Add at least one item and warehouse first.', true); return; }
+  const { error } = await sb.from('stock_transactions').insert(payload);
+  if (error) { toast('Could not record stock out: ' + error.message, true); return; }
+  toast('Stock out recorded.');
+  e.target.reset();
+  $('#out-date').value = todayStr();
+  await loadAllData();
+  refreshStockOutList();
+  updateOutAvailHint();
+});
+
+/* ================================== LEDGER ================================== */
+async function renderLedger(){
+  let query = sb.from('stock_transactions')
+    .select('*, items(item_code, description, uom), warehouses(name), vendors(name)')
+    .order('txn_date', { ascending: false }).order('created_at', { ascending: false }).limit(200);
+  const itemF = $('#ledger-item-filter').value, whF = $('#ledger-warehouse-filter').value, typeF = $('#ledger-type-filter').value;
+  if (itemF) query = query.eq('item_id', itemF);
+  if (whF) query = query.eq('warehouse_id', whF);
+  if (typeF) query = query.eq('txn_type', typeF);
+  const { data, error } = await query;
+  if (error) { toast('Could not load ledger: ' + error.message, true); return; }
+  $('#ledger-body').innerHTML = (data && data.length) ? data.map(t => {
+    const pillClass = t.txn_type === 'IN' || t.txn_type === 'TRANSFER_IN' ? 'in' : (t.txn_type === 'OUT' || t.txn_type === 'TRANSFER_OUT' ? 'out' : 'adj');
+    const counterparty = t.vendors?.name || t.issued_to || '—';
+    return `<tr>
+      <td>${fmtDate(t.txn_date)}</td>
+      <td><span class="pill ${pillClass}">${t.txn_type}</span></td>
+      <td>${escapeHtml(t.items?.item_code || '')} — ${escapeHtml(t.items?.description || '')}</td>
+      <td class="mono">${fmtNum(t.quantity)} ${escapeHtml(t.items?.uom || '')}</td>
+      <td>${escapeHtml(t.warehouses?.name || '')}</td>
+      <td>${escapeHtml(counterparty)}</td>
+      <td class="mono">${escapeHtml(t.reference_no || '—')}</td>
+      <td>${escapeHtml(t.remarks || '—')}</td>
+    </tr>`;
+  }).join('') : '<tr class="empty-row"><td colspan="8">No transactions match these filters.</td></tr>';
+}
+$('#ledger-item-filter').addEventListener('change', renderLedger);
+$('#ledger-warehouse-filter').addEventListener('change', renderLedger);
+$('#ledger-type-filter').addEventListener('change', renderLedger);
+
+/* ================================== VENDORS ================================== */
+function renderVendors(){
+  $('#vendors-body').innerHTML = CACHE.vendors.length ? CACHE.vendors.map(v => `
+    <tr>
+      <td>${escapeHtml(v.name)}</td>
+      <td>${escapeHtml(v.contact_person || '—')}</td>
+      <td>${escapeHtml(v.phone || '—')}</td>
+      <td>${escapeHtml(v.email || '—')}</td>
+      <td><button class="btn sm ghost danger" data-del-vendor="${v.id}">Delete</button></td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No vendors yet.</td></tr>';
+  $$('[data-del-vendor]').forEach(b => b.addEventListener('click', () => deleteRow('vendors', b.dataset.delVendor, renderVendors)));
+}
+$('#btn-new-vendor').addEventListener('click', () => { $('#form-vendor').reset(); openModal('#modal-vendor'); });
+$('#form-vendor').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    name: $('#vendor-name').value.trim(),
+    contact_person: $('#vendor-contact').value.trim() || null,
+    phone: $('#vendor-phone').value.trim() || null,
+    email: $('#vendor-email').value.trim() || null,
+  };
+  const { error } = await sb.from('vendors').insert(payload);
+  if (error) { toast('Save failed: ' + error.message, true); return; }
+  closeModal('#modal-vendor'); toast('Vendor added.');
+  await loadAllData(); renderVendors();
+});
+
+/* ================================= WAREHOUSES ================================= */
+function renderWarehouses(){
+  $('#warehouses-body').innerHTML = CACHE.warehouses.length ? CACHE.warehouses.map(w => `
+    <tr>
+      <td class="mono">${escapeHtml(w.code)}</td>
+      <td>${escapeHtml(w.name)}</td>
+      <td>${escapeHtml(w.location || '—')}</td>
+      <td><button class="btn sm ghost danger" data-del-warehouse="${w.id}">Delete</button></td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="4">No warehouses yet.</td></tr>';
+  $$('[data-del-warehouse]').forEach(b => b.addEventListener('click', () => deleteRow('warehouses', b.dataset.delWarehouse, renderWarehouses)));
+}
+$('#btn-new-warehouse').addEventListener('click', () => { $('#form-warehouse').reset(); openModal('#modal-warehouse'); });
+$('#form-warehouse').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    code: $('#warehouse-code').value.trim(),
+    name: $('#warehouse-name').value.trim(),
+    location: $('#warehouse-location').value.trim() || null,
+  };
+  const { error } = await sb.from('warehouses').insert(payload);
+  if (error) { toast('Save failed: ' + error.message, true); return; }
+  closeModal('#modal-warehouse'); toast('Warehouse added.');
+  await loadAllData(); renderWarehouses();
+});
+
+async function deleteRow(table, id, refreshFn){
+  if (!confirm('Delete this record?')) return;
+  const { error } = await sb.from(table).update({ is_active: false }).eq('id', id);
+  if (error) { toast('Delete failed: ' + error.message, true); return; }
+  toast('Removed.');
+  await loadAllData(); refreshFn();
+}
+
+/* ================================== STARTUP ================================== */
+checkSession();
+</script>
+</body>
+</html>

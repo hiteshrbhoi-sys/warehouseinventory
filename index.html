@@ -698,6 +698,38 @@ function fmtVal(v){
   return String(v);
 }
 
+/* ============================================================
+   REPORT EXPORT (CSV)
+   Generic client-side CSV export used by Current Stock, Balance
+   Report and Transactions. Exports whatever is currently on
+   screen (i.e. respects the active search filter), not the
+   whole unfiltered dataset.
+   ============================================================ */
+function csvCell(v){
+  if(v===null || v===undefined) return '';
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function downloadCsv(filename, headers, rows){
+  if(!rows.length){ toast('Nothing to export', true); return; }
+  const lines = [headers.map(h=>csvCell(h.label)).join(',')];
+  rows.forEach(r=>{
+    lines.push(headers.map(h=>csvCell(typeof h.value==='function' ? h.value(r) : r[h.value])).join(','));
+  });
+  const csv = '\uFEFF' + lines.join('\r\n'); // BOM so Excel opens UTF-8 correctly
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('Exported ' + rows.length + ' row' + (rows.length===1?'':'s'));
+}
+function exportBtnHtml(onclick){
+  return `<button class="icon-btn" onclick="${onclick}">⬇ Export CSV</button>`;
+}
+function todayStamp(){ return new Date().toISOString().slice(0,10); }
+
 async function getFkOptions(table, valueField, labelField){
   const cacheKey = table+':'+valueField+':'+labelField;
   if(fkCache[cacheKey]) return fkCache[cacheKey];
@@ -932,12 +964,17 @@ async function renderStockLevels(){
   const { data, error } = await sb.from('v_current_stock').select('*').order('item_code');
   if(error){ content().innerHTML = `<div class="empty-state"><div class="big">Couldn't load stock</div>${error.message}</div>`; return; }
   currentRows = data || [];
+  visibleStockRows = currentRows;
   paintStockTable(currentRows);
 }
+let visibleStockRows = [];
 function paintStockTable(rows){
   let html = `<div class="toolbar">
     <div class="search-box"><input id="searchBox" placeholder="Search stock…" oninput="filterStockTable()"></div>
-    <div style="font-size:12px;color:var(--ink-soft);">${rows.length} balance${rows.length===1?'':'s'}</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:12px;color:var(--ink-soft);">${rows.length} balance${rows.length===1?'':'s'}</div>
+      ${exportBtnHtml('exportStockCsv()')}
+    </div>
   </div><div class="panel"><table><thead><tr>
     <th>Item code</th><th>Item name</th><th>Warehouse</th><th>On hand</th><th>Reorder level</th><th>Status</th>
   </tr></thead><tbody id="tblBody">`;
@@ -956,8 +993,19 @@ function stockRowsHtml(rows){
 }
 function filterStockTable(){
   const q = document.getElementById('searchBox').value.toLowerCase();
-  const filtered = currentRows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
-  document.getElementById('tblBody').innerHTML = stockRowsHtml(filtered);
+  visibleStockRows = currentRows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
+  document.getElementById('tblBody').innerHTML = stockRowsHtml(visibleStockRows);
+}
+function exportStockCsv(){
+  downloadCsv('current-stock-' + todayStamp() + '.csv', [
+    {label:'Item Code', value:'item_code'},
+    {label:'Item Name', value:'item_name'},
+    {label:'Warehouse', value:'warehouse_name'},
+    {label:'On Hand', value:'quantity'},
+    {label:'UOM', value:'uom_symbol'},
+    {label:'Reorder Level', value:'reorder_level'},
+    {label:'Status', value:r=>r.below_reorder ? 'Below reorder' : 'OK'},
+  ], visibleStockRows);
 }
 
 /* ============================================================
@@ -971,8 +1019,10 @@ async function renderBalanceReport(){
   const { data, error } = await sb.from('v_balance_report').select('*').order('item_code');
   if(error){ content().innerHTML = `<div class="empty-state"><div class="big">Couldn't load the balance report</div>${error.message}</div>`; return; }
   currentRows = data || [];
+  visibleBalanceRows = currentRows;
   paintBalanceReport(currentRows);
 }
+let visibleBalanceRows = [];
 function paintBalanceReport(rows){
   const totals = rows.reduce((acc,r)=>{
     acc.opening += Number(r.opening_stock)||0;
@@ -984,7 +1034,10 @@ function paintBalanceReport(rows){
 
   let html = `<div class="toolbar">
     <div class="search-box"><input id="searchBox" placeholder="Search balance report…" oninput="filterBalanceReport()"></div>
-    <div style="font-size:12px;color:var(--ink-soft);">${rows.length} item${rows.length===1?'':'s'}</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:12px;color:var(--ink-soft);">${rows.length} item${rows.length===1?'':'s'}</div>
+      ${exportBtnHtml('exportBalanceCsv()')}
+    </div>
   </div><div class="panel"><table><thead><tr>
     <th>Item code</th><th>Item name</th><th>UOM</th>
     <th style="text-align:right;">Opening Stock</th><th style="text-align:right;">Inward</th>
@@ -1012,8 +1065,19 @@ function balanceRowsHtml(rows){
 }
 function filterBalanceReport(){
   const q = document.getElementById('searchBox').value.toLowerCase();
-  const filtered = currentRows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
-  document.getElementById('tblBody').innerHTML = balanceRowsHtml(filtered);
+  visibleBalanceRows = currentRows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
+  document.getElementById('tblBody').innerHTML = balanceRowsHtml(visibleBalanceRows);
+}
+function exportBalanceCsv(){
+  downloadCsv('balance-report-' + todayStamp() + '.csv', [
+    {label:'Item Code', value:'item_code'},
+    {label:'Item Name', value:'item_name'},
+    {label:'UOM', value:'uom_symbol'},
+    {label:'Opening Stock', value:'opening_stock'},
+    {label:'Total Inward', value:'total_inward'},
+    {label:'Total Outward', value:'total_outward'},
+    {label:'Balance', value:'balance'},
+  ], visibleBalanceRows);
 }
 function fmtQty(n){
   if(n===null||n===undefined) return '0';
@@ -1030,9 +1094,13 @@ async function renderTransactions(){
   const { data, error } = await sb.from('stock_transaction').select('*').order('created_at',{ascending:false}).limit(200);
   if(error){ content().innerHTML = `<div class="empty-state"><div class="big">Couldn't load transactions</div>${error.message}</div>`; return; }
   currentRows = data || [];
+  visibleTxnRows = currentRows;
   let html = `<div class="toolbar">
     <div class="search-box"><input id="searchBox" placeholder="Search transactions…" oninput="filterTxnTable()"></div>
-    <div style="font-size:12px;color:var(--ink-soft);">${currentRows.length} transaction${currentRows.length===1?'':'s'}</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:12px;color:var(--ink-soft);">${currentRows.length} transaction${currentRows.length===1?'':'s'}</div>
+      ${exportBtnHtml('exportTxnCsv()')}
+    </div>
   </div><div class="panel"><table><thead><tr>
     <th>Date</th><th>Txn no.</th><th>Type</th><th>Qty</th><th>Reference</th><th>Approval</th>
   </tr></thead><tbody id="tblBody">`;
@@ -1040,6 +1108,7 @@ async function renderTransactions(){
   html += `</tbody></table></div>`;
   content().innerHTML = html;
 }
+let visibleTxnRows = [];
 function txnRowsHtml(rows){
   if(!rows.length) return `<tr><td colspan="6"><div class="empty-state"><div class="big">No transactions yet</div>Click "+ New transaction" to record a receipt, issue, return, transfer, adjustment or scrap.</div></td></tr>`;
   return rows.map(r=>`<tr>
@@ -1053,8 +1122,22 @@ function txnRowsHtml(rows){
 }
 function filterTxnTable(){
   const q = document.getElementById('searchBox').value.toLowerCase();
-  const filtered = currentRows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
-  document.getElementById('tblBody').innerHTML = txnRowsHtml(filtered);
+  visibleTxnRows = currentRows.filter(r => JSON.stringify(r).toLowerCase().includes(q));
+  document.getElementById('tblBody').innerHTML = txnRowsHtml(visibleTxnRows);
+}
+function exportTxnCsv(){
+  downloadCsv('stock-transactions-' + todayStamp() + '.csv', [
+    {label:'Date', value:r=>new Date(r.created_at).toLocaleString()},
+    {label:'Txn No.', value:'transaction_no'},
+    {label:'Type', value:'transaction_type'},
+    {label:'Item ID', value:'item_id'},
+    {label:'Warehouse ID', value:'warehouse_id'},
+    {label:'To Warehouse ID', value:'to_warehouse_id'},
+    {label:'Quantity', value:'quantity'},
+    {label:'Reference No.', value:'reference_no'},
+    {label:'Approval Status', value:'approval_status'},
+    {label:'Remarks', value:'remarks'},
+  ], visibleTxnRows);
 }
 
 async function openTransactionForm(){
